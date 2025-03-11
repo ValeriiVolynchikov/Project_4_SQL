@@ -1,13 +1,23 @@
 import psycopg2
+from typing import List, Tuple, Dict, Any
+
 
 class DBManager:
-    """Класс для управления данными в БД"""
+    """Класс для управления данными в БД
 
-    def __init__(self, params: dict):
+    Args:
+        params (Dict[str, str]): Параметры подключения к PostgreSQL (host, user, password, database).
+    """
+
+    def __init__(self, params: Dict[str, str]):
         self.params = params
 
-    def get_companies_and_vacancies_count(self):
-        """Получает список всех компаний и количество вакансий у каждой"""
+    def get_companies_and_vacancies_count(self) -> List[Tuple[str, int]]:
+        """Получает список всех компаний и количество вакансий у каждой
+
+        Returns:
+            List[Tuple[str, int]]: Список кортежей (название компании, количество вакансий).
+        """
         query = """
             SELECT e.name, COUNT(v.id) AS vacancy_count
             FROM employers e
@@ -16,17 +26,33 @@ class DBManager:
         """
         return self._execute_query(query)
 
-    def get_all_vacancies(self):
-        """Получает список всех вакансий"""
+    def get_all_vacancies(self) -> List[Tuple[str, str, int, int, str, str]]:
+        """Получает список всех вакансий с информацией о компании
+
+        Returns:
+            List[Tuple[str, str, int, int, str, str]]:
+                Список кортежей (название компании, название вакансии,
+                зарплата от, зарплата до, валюта, URL вакансии).
+        """
         query = """
-            SELECT e.name AS employer_name, v.title, v.salary_from, v.salary_to, v.currency, v.url
+            SELECT 
+                e.name AS employer_name, 
+                v.title, 
+                v.salary_from, 
+                v.salary_to, 
+                v.currency, 
+                v.url
             FROM vacancies v
             JOIN employers e ON v.employer_id = e.employer_id;
         """
         return self._execute_query(query)
 
-    def get_avg_salary(self):
-        """Получает среднюю зарплату"""
+    def get_avg_salary(self) -> List[Tuple[float]]:
+        """Получает среднюю зарплату по всем вакансиям
+
+        Returns:
+            List[Tuple[float]]: Средняя зарплата в виде списка с одним элементом.
+        """
         query = """
             SELECT AVG((salary_from + salary_to) / 2) AS avg_salary
             FROM vacancies
@@ -34,37 +60,62 @@ class DBManager:
         """
         return self._execute_query(query)
 
-    def get_vacancies_with_higher_salary(self):
-        """Получает вакансии с зарплатой выше средней"""
+    def get_vacancies_with_higher_salary(self) -> List[Tuple[str, float]]:
+        """Получает вакансии с зарплатой выше средней
+
+        Returns:
+            List[Tuple[str, float]]:
+                Список кортежей (название вакансии, средняя зарплата).
+        """
         query = """
-            SELECT title, (salary_from + salary_to) / 2 AS avg_salary
+            SELECT 
+                title, 
+                (salary_from + salary_to) / 2 AS avg_salary
             FROM vacancies
-            WHERE (salary_from + salary_to) / 2 > (SELECT AVG((salary_from + salary_to) / 2) FROM vacancies)
-            AND salary_from IS NOT NULL AND salary_to IS NOT NULL;
+            WHERE 
+                (salary_from + salary_to) / 2 > (
+                    SELECT AVG((salary_from + salary_to) / 2) 
+                    FROM vacancies
+                )
+                AND salary_from IS NOT NULL 
+                AND salary_to IS NOT NULL;
         """
         return self._execute_query(query)
 
-    def get_vacancies_with_keyword(self, keyword: str):
-        """Получает вакансии с указанным ключевым словом"""
-        query = f"""
+    def get_vacancies_with_keyword(
+        self,
+        keyword: str
+    ) -> List[Tuple[str, int, str]]:
+        """Получает вакансии, содержащие ключевое слово в названии
+
+        Args:
+            keyword (str): Ключевое слово для поиска (например, "Python").
+
+        Returns:
+            List[Tuple[str, int, str]]:
+                Список кортежей (название вакансии, ID работодателя, URL).
+        """
+        # Используем параметризованный запрос для безопасности
+        query = """
             SELECT title, employer_id, url
             FROM vacancies
-            WHERE title ILIKE '%{keyword}%';
+            WHERE LOWER(title) LIKE %s;
         """
-        return self._execute_query(query)
+        with psycopg2.connect(**self.params) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, (f"%{keyword.lower()}%",))
+                return cursor.fetchall()
 
-    def _execute_query(self, query: str):
-        """Выполняет SQL-запрос и возвращает результат"""
+    def _execute_query(self, query: str) -> List[Tuple[Any, ...]]:
+        """Выполняет SQL-запрос и возвращает результат
+
+        Args:
+            query (str): SQL-запрос.
+
+        Returns:
+            List[Tuple[Any, ...]]: Результат выполнения запроса.
+        """
         with psycopg2.connect(**self.params) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(query)
                 return cursor.fetchall()
-
-# Пример использования:
-# db = DBManager({
-#     "host": "localhost",
-#     "user": "postgres",
-#     "password": "your_password",
-#     "dbname": "hh_db"
-# })
-# print(db.get_companies_and_vacancies_count())

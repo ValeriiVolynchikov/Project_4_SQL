@@ -1,127 +1,203 @@
+import logging
+import time
 from hh_api import HH_API
 from db_utils import create_database, create_tables
 from db_manager import DBManager
 import psycopg2
 
-def insert_employers(data: list, conn):
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    filename='app.log'
+)
+
+
+def validate_data(vacancy: dict) -> bool:
+    """Проверяет корректность данных вакансии"""
+    required_fields = ["id", "name", "employer"]
+    for field in required_fields:
+        if field not in vacancy:
+            logging.warning(f"Отсутствует обязательное поле {field} в вакансии {vacancy.get('id', 'N/A')}")
+            return False
+    return True
+
+
+def get_vacancies_with_retry(api, employer_id: str, retries: int = 3) -> list:
+    """Получает вакансии с повторными попытками"""
+    for attempt in range(retries + 1):
+        try:
+            return api.get_vacancies(employer_id)
+        except Exception as e:
+            if attempt < retries:
+                wait_time = 2 ** attempt
+                logging.warning(f"Повторная попытка ({attempt+1}/{retries}) через {wait_time} сек...")
+                time.sleep(wait_time)
+            else:
+                logging.error(f"Не удалось получить вакансии для {employer_id}: {str(e)}")
+                return []
+
+
+def insert_employers(data: list[dict], conn: psycopg2.extensions.connection) -> None:
     """Вставляет данные о работодателях в таблицу employers"""
     with conn.cursor() as cursor:
         for employer in data:
-            cursor.execute("""
-                INSERT INTO employers (employer_id, name, url)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (employer_id) DO NOTHING;
-            """, (employer["id"], employer["name"], employer["alternate_url"]))
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO employers (employer_id, name, url)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (employer_id) DO NOTHING;
+                    """,
+                    (
+                        employer.get("id"),
+                        employer.get("name", ""),
+                        employer.get("alternate_url", "")
+                    ),
+                )
+            except Exception as e:
+                logging.error(f"Ошибка при вставке работодателя {employer.get('id', 'N/A')}: {str(e)}")
     conn.commit()
 
-def insert_vacancies(data: list, conn):
+
+def insert_vacancies(data: list[dict], conn: psycopg2.extensions.connection) -> None:
     """Вставляет данные о вакансиях в таблицу vacancies"""
     with conn.cursor() as cursor:
         for vacancy in data:
-            cursor.execute("""
-                INSERT INTO vacancies (vacancy_id, title, salary_from, salary_to, currency, employer_id, url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (vacancy_id) DO NOTHING;
-            """, (
-                vacancy["id"],
-                vacancy["name"],
-                vacancy["salary"]["from"] if vacancy.get("salary") else None,
-                vacancy["salary"]["to"] if vacancy.get("salary") else None,
-                vacancy["salary"]["currency"] if vacancy.get("salary") else None,
-                vacancy["employer"]["id"],
-                vacancy["alternate_url"]
-            ))
+            if not validate_data(vacancy):
+                continue
+            employer = vacancy.get("employer", {})
+            salary = vacancy.get("salary", {})
+            if not isinstance(salary, dict):
+                salary = {}
+
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO vacancies (
+                        vacancy_id, title, salary_from, salary_to, currency, employer_id, url
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (vacancy_id) DO NOTHING;
+                    """,
+                    (
+                        vacancy.get("id", None),
+                        vacancy.get("name", ""),
+                        salary.get("from"),
+                        salary.get("to"),
+                        salary.get("currency"),
+                        employer.get("id", None),
+                        vacancy.get("alternate_url", "")
+                    ),
+                )
+            except Exception as e:
+                logging.error(f"Ошибка при вставке вакансии {vacancy.get('id', 'N/A')}: {str(e)}")
     conn.commit()
 
-def main():
-    # Список ID компаний
-    employer_ids = ["1942330",
-    "49357",
-    "3036416",
-    "78638",
-    "2748",
-    "1740",
-    "3529",
-    "23427",
-    "3772",
-    "15478",
-     "1122462"
-    ]  # Добавьте IDs компаний
 
-    # Создаем экземпляр API
-    api = HH_API()
+def main() -> None:
+    try:
+        employer_ids = [
+            "1942330", "49357", "3036416", "78638", "2748",
+            "1740", "3529", "23427", "3772", "15478", "1122462"
+        ]
+        employer_ids = [id.strip() for id in employer_ids if id.strip()]
 
-    # Подключаемся к БД
-    db_params = {
-        "host": "localhost",
-        "user": "postgres",
-        "password": "vvp162",
-        "database": "hh_db"
-    }
+        api = HH_API()
+        db_params = {
+            "host": "localhost",
+            "user": "postgres",
+            "password": "vvp162",
+            "database": "hh_db"
+        }
 
-    # Создаем БД и таблицы
-    create_database("hh_db", {**db_params, "database": "postgres"})
-    create_tables("hh_db", db_params)
+        # Создаем БД и таблицы
+        create_database("hh_db", {**db_params, "database": "postgres"})
+        create_tables("hh_db", db_params)
 
-    # Получаем данные о компаниях и вакансиях
-    employers_data = [api.get_employer(id) for id in employer_ids]
-    vacancies_data = []
-    for employer_id in employer_ids:
-        vacancies_data.extend(api.get_vacancies(employer_id))
+        # Получаем данные
+        employers_data = []
+        for employer_id in employer_ids:
+            try:
+                employer = api.get_employer(employer_id)
+                employers_data.append(employer)
+            except Exception as e:
+                logging.error(f"Ошибка при получении данных о работодателе {employer_id}: {str(e)}")
 
-    # Вставляем данные в БД
-    with psycopg2.connect(**db_params) as conn:
-        insert_employers(employers_data, conn)
-        insert_vacancies(vacancies_data, conn)
+        vacancies_data = []
+        for employer_id in employer_ids:
+            vacancies = get_vacancies_with_retry(api, employer_id)
+            vacancies_data.extend(vacancies)
+
+        # Загружаем данные в БД
+        with psycopg2.connect(**db_params) as conn:
+            insert_employers(employers_data, conn)
+            insert_vacancies(vacancies_data, conn)
+
+        print("Данные успешно загружены в БД")
+    except psycopg2.Error as e:
+        logging.critical(f"Ошибка БД: {str(e)}")
+    except Exception as e:
+        logging.critical(f"Неизвестная ошибка: {str(e)}")
+
+
+def user_interface() -> None:
+    try:
+        db = DBManager({
+            "host": "localhost",
+            "user": "postgres",
+            "password": "vvp162",
+            "database": "hh_db"
+        })
+
+        while True:
+            print("\nВыберите действие:")
+            print("1. Компании и количество вакансий")
+            print("2. Все вакансии")
+            print("3. Средняя зарплата")
+            print("4. Вакансии с зарплатой выше средней")
+            print("5. Поиск вакансий по ключевому слову")
+            print("0. Выход")
+
+            choice = input("Введите номер действия: ")
+
+            try:
+                if choice == "1":
+                    result = db.get_companies_and_vacancies_count()
+                    for row in result:
+                        print(f"Компания: {row[0]}, Вакансий: {row[1]}")
+                elif choice == "2":
+                    result = db.get_all_vacancies()
+                    for row in result:
+                        print(
+                            f"Компания: {row[0]}, Вакансия: {row[1]}, "
+                            f"Зарплата: {row[2]}-{row[3]} {row[4]}, URL: {row[5]}"
+                        )
+                elif choice == "3":
+                    result = db.get_avg_salary()
+                    print(f"Средняя зарплата: {result[0][0]}")
+                elif choice == "4":
+                    result = db.get_vacancies_with_higher_salary()
+                    for row in result:
+                        print(f"Вакансия: {row[0]}, Зарплата: {row[1]}")
+                elif choice == "5":
+                    keyword = input("Введите ключевое слово: ")
+                    result = db.get_vacancies_with_keyword(keyword)
+                    for row in result:
+                        print(f"Вакансия: {row[0]}, Компания: {row[1]}, URL: {row[2]}")
+                elif choice == "0":
+                    break
+                else:
+                    print("Неверный выбор. Попробуйте снова.")
+            except Exception as e:
+                logging.error(f"Ошибка при выполнении запроса: {str(e)}")
+                print("Произошла ошибка. Попробуйте снова.")
+    except Exception as e:
+        logging.critical(f"Критическая ошибка интерфейса: {str(e)}")
+
 
 if __name__ == "__main__":
     main()
-    print("Данные успешно загружены в БД")
-
-
-def user_interface():
-    db = DBManager({
-        "host": "localhost",
-        "user": "postgres",
-        "password": "vvp162",
-        "database": "hh_db"
-    })
-
-    while True:
-        print("\nВыберите действие:")
-        print("1. Компании и количество вакансий")
-        print("2. Все вакансии")
-        print("3. Средняя зарплата")
-        print("4. Вакансии с зарплатой выше средней")
-        print("5. Поиск вакансий по ключевому слову")
-        print("0. Выход")
-
-        choice = input("Введите номер действия: ")
-
-        if choice == "1":
-            result = db.get_companies_and_vacancies_count()
-            for row in result:
-                print(f"Компания: {row[0]}, Вакансий: {row[1]}")
-        elif choice == "2":
-            result = db.get_all_vacancies()
-            for row in result:
-                print(f"Компания: {row[0]}, Вакансия: {row[1]}, Зарплата: {row[2]}-{row[3]} {row[4]}, URL: {row[5]}")
-        elif choice == "3":
-            result = db.get_avg_salary()
-            print(f"Средняя зарплата: {result[0][0]}")
-        elif choice == "4":
-            result = db.get_vacancies_with_higher_salary()
-            for row in result:
-                print(f"Вакансия: {row[0]}, Зарплата: {row[1]}")
-        elif choice == "5":
-            keyword = input("Введите ключевое слово: ")
-            result = db.get_vacancies_with_keyword(keyword)
-            for row in result:
-                print(f"Вакансия: {row[0]}, Компания: {row[1]}, URL: {row[2]}")
-        elif choice == "0":
-            break
-        else:
-            print("Неверный выбор. Попробуйте снова.")
-
-if __name__ == "__main__":
-    user_interface()
+    try:
+        user_interface()
+    except KeyboardInterrupt:
+        logging.info("Программа остановлена пользователем")

@@ -19,8 +19,3 @@ class HH_API:
         params = {"employer_id": employer_id}
         response = requests.get(url, params=params)
         return response.json().get("items", []) if response.status_code == 200 else []
-
-# Пример использования:
-# api = HH_API()
-# employer_data = api.get_employer(12345)
-# vacancies = api.get_vacancies(12345)
