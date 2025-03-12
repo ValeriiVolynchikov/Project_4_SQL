@@ -19,15 +19,9 @@ def create_database(database_name: str, params: dict) -> None:
     cursor = conn.cursor()
 
     try:
+        cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {};").format(sql.Identifier(database_name)))
         cursor.execute(
-            sql.SQL("DROP DATABASE IF EXISTS {};").format(
-                sql.Identifier(database_name)
-            )
-        )
-        cursor.execute(
-            sql.SQL("CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8';").format(
-                sql.Identifier(database_name)
-            )
+            sql.SQL("CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8';").format(sql.Identifier(database_name))
         )
     finally:
         cursor.close()

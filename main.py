@@ -1,9 +1,12 @@
 import logging
 import time
-from hh_api import HH_API
-from db_utils import create_database, create_tables
-from db_manager import DBManager
+from typing import List, Tuple
+
 import psycopg2
+
+from db_manager import DBManager
+from db_utils import create_database, create_tables
+from hh_api import HH_API
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,7 +25,11 @@ def validate_data(vacancy: dict) -> bool:
     return True
 
 
-def get_vacancies_with_retry(api, employer_id: str, retries: int = 3) -> list:
+def get_vacancies_with_retry(
+    api: HH_API,
+    employer_id: int,
+    retries: int = 3
+) -> list[dict]:
     """Получает вакансии с повторными попытками"""
     for attempt in range(retries + 1):
         try:
@@ -30,11 +37,11 @@ def get_vacancies_with_retry(api, employer_id: str, retries: int = 3) -> list:
         except Exception as e:
             if attempt < retries:
                 wait_time = 2 ** attempt
-                logging.warning(f"Повторная попытка ({attempt+1}/{retries}) через {wait_time} сек...")
+                logging.warning(f"Повторная попытка ({attempt + 1}/{retries}) через {wait_time} сек...")
                 time.sleep(wait_time)
             else:
                 logging.error(f"Не удалось получить вакансии для {employer_id}: {str(e)}")
-                return []
+    return []
 
 
 def insert_employers(data: list[dict], conn: psycopg2.extensions.connection) -> None:
@@ -114,22 +121,30 @@ def main() -> None:
         create_database("hh_db", {**db_params, "database": "postgres"})
         create_tables("hh_db", db_params)
 
-        # Получаем данные
+        # Получаем данные о работодателях
         employers_data = []
-        for employer_id in employer_ids:
+        for employer_id_str in employer_ids:
+            employer_id = int(employer_id_str)  # Преобразуем в int
             try:
                 employer = api.get_employer(employer_id)
                 employers_data.append(employer)
             except Exception as e:
                 logging.error(f"Ошибка при получении данных о работодателе {employer_id}: {str(e)}")
 
+        # Получаем данные о вакансиях
         vacancies_data = []
-        for employer_id in employer_ids:
+        for employer_id_str in employer_ids:
+            employer_id = int(employer_id_str)
             vacancies = get_vacancies_with_retry(api, employer_id)
             vacancies_data.extend(vacancies)
 
         # Загружаем данные в БД
-        with psycopg2.connect(**db_params) as conn:
+        with psycopg2.connect(
+            host=db_params["host"],
+            user=db_params["user"],
+            password=db_params["password"],
+            database=db_params["database"]
+        ) as conn:
             insert_employers(employers_data, conn)
             insert_vacancies(vacancies_data, conn)
 
@@ -162,28 +177,40 @@ def user_interface() -> None:
 
             try:
                 if choice == "1":
-                    result = db.get_companies_and_vacancies_count()
-                    for row in result:
-                        print(f"Компания: {row[0]}, Вакансий: {row[1]}")
+                    companies = db.get_companies_and_vacancies_count()
+                    for company in companies:
+                        print(f"Компания: {company[0]}, Вакансий: {company[1]}")
                 elif choice == "2":
-                    result = db.get_all_vacancies()
-                    for row in result:
-                        print(
-                            f"Компания: {row[0]}, Вакансия: {row[1]}, "
-                            f"Зарплата: {row[2]}-{row[3]} {row[4]}, URL: {row[5]}"
-                        )
+                    vacancies = db.get_all_vacancies()
+                    for vacancy in vacancies:
+                        if len(vacancy) >= 6:
+                            print(
+                                f"Компания: {vacancy[0]}, Вакансия: {vacancy[1]}, "
+                                f"Зарплата: {vacancy[2]}-{vacancy[3]} {vacancy[4]}, URL: {vacancy[5]}"
+                            )
+                        else:
+                            print("Неполные данные вакансии")
                 elif choice == "3":
-                    result = db.get_avg_salary()
-                    print(f"Средняя зарплата: {result[0][0]}")
+                    avg_salary = db.get_avg_salary()
+                    if avg_salary and avg_salary[0] and len(avg_salary[0]) > 0:
+                        print(f"Средняя зарплата: {avg_salary[0][0]}")
+                    else:
+                        print("Данные о зарплатах отсутствуют")
                 elif choice == "4":
-                    result = db.get_vacancies_with_higher_salary()
-                    for row in result:
-                        print(f"Вакансия: {row[0]}, Зарплата: {row[1]}")
+                    higher_salary_vacancies: List[Tuple[str, float]] = db.get_vacancies_with_higher_salary()
+                    for item in higher_salary_vacancies:  # Используем другое имя переменной
+                        if len(item) >= 2:
+                            print(f"Вакансия: {item[0]}, Зарплата: {item[1]}")
+                        else:
+                            print("Неполные данные вакансии")
                 elif choice == "5":
                     keyword = input("Введите ключевое слово: ")
-                    result = db.get_vacancies_with_keyword(keyword)
-                    for row in result:
-                        print(f"Вакансия: {row[0]}, Компания: {row[1]}, URL: {row[2]}")
+                    keyword_vacancies: List[Tuple[str, int, str]] = db.get_vacancies_with_keyword(keyword)
+                    for entry in keyword_vacancies:  # Используем другое имя переменной
+                        if len(entry) >= 3:
+                            print(f"Вакансия: {entry[0]}, Компания: {entry[1]}, URL: {entry[2]}")
+                        else:
+                            print("Неполные данные вакансии")
                 elif choice == "0":
                     break
                 else:

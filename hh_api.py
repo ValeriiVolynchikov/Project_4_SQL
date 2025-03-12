@@ -1,10 +1,12 @@
+# from typing import Dict
+
 import requests
 
 
 class HH_API:
     """Класс для получения данных с API hh.ru"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.base_url = "https://api.hh.ru"
 
     def get_employer(self, employer_id: int) -> dict:
@@ -13,7 +15,7 @@ class HH_API:
         response = requests.get(url)
         return response.json() if response.status_code == 200 else {}
 
-    def get_vacancies(self, employer_id: int) -> list:
+    def get_vacancies(self, employer_id: int) -> list[dict]:
         """Получить список вакансий работодателя по ID"""
         url = f"{self.base_url}/vacancies"
         params = {"employer_id": employer_id}

@@ -1,5 +1,6 @@
+from typing import Any, Dict, List, Tuple, cast
+
 import psycopg2
-from typing import List, Tuple, Dict, Any
 
 
 class DBManager:
@@ -24,7 +25,7 @@ class DBManager:
             LEFT JOIN vacancies v ON e.employer_id = v.employer_id
             GROUP BY e.name;
         """
-        return self._execute_query(query)
+        return cast(List[Tuple[str, int]], self._execute_query(query))
 
     def get_all_vacancies(self) -> List[Tuple[str, str, int, int, str, str]]:
         """Получает список всех вакансий с информацией о компании
@@ -35,17 +36,17 @@ class DBManager:
                 зарплата от, зарплата до, валюта, URL вакансии).
         """
         query = """
-            SELECT 
-                e.name AS employer_name, 
-                v.title, 
-                v.salary_from, 
-                v.salary_to, 
-                v.currency, 
+            SELECT
+                e.name AS employer_name,
+                v.title,
+                v.salary_from,
+                v.salary_to,
+                v.currency,
                 v.url
             FROM vacancies v
             JOIN employers e ON v.employer_id = e.employer_id;
         """
-        return self._execute_query(query)
+        return cast(List[Tuple[str, str, int, int, str, str]], self._execute_query(query))
 
     def get_avg_salary(self) -> List[Tuple[float]]:
         """Получает среднюю зарплату по всем вакансиям
@@ -54,11 +55,12 @@ class DBManager:
             List[Tuple[float]]: Средняя зарплата в виде списка с одним элементом.
         """
         query = """
-            SELECT AVG((salary_from + salary_to) / 2) AS avg_salary
+            SELECT ROUND(AVG((salary_from + salary_to) / 2)) AS avg_salary
             FROM vacancies
             WHERE salary_from IS NOT NULL AND salary_to IS NOT NULL;
         """
-        return self._execute_query(query)
+        result = self._execute_query(query)
+        return cast(List[Tuple[float]], result)
 
     def get_vacancies_with_higher_salary(self) -> List[Tuple[str, float]]:
         """Получает вакансии с зарплатой выше средней
@@ -68,24 +70,22 @@ class DBManager:
                 Список кортежей (название вакансии, средняя зарплата).
         """
         query = """
-            SELECT 
-                title, 
+            SELECT
+                title,
                 (salary_from + salary_to) / 2 AS avg_salary
             FROM vacancies
-            WHERE 
+            WHERE
                 (salary_from + salary_to) / 2 > (
-                    SELECT AVG((salary_from + salary_to) / 2) 
+
+                    SELECT AVG((salary_from + salary_to) / 2)
                     FROM vacancies
                 )
-                AND salary_from IS NOT NULL 
+                AND salary_from IS NOT NULL
                 AND salary_to IS NOT NULL;
         """
-        return self._execute_query(query)
+        return cast(List[Tuple[str, float]], self._execute_query(query))
 
-    def get_vacancies_with_keyword(
-        self,
-        keyword: str
-    ) -> List[Tuple[str, int, str]]:
+    def get_vacancies_with_keyword(self, keyword: str) -> List[Tuple[str, int, str]]:
         """Получает вакансии, содержащие ключевое слово в названии
 
         Args:
@@ -101,10 +101,18 @@ class DBManager:
             FROM vacancies
             WHERE LOWER(title) LIKE %s;
         """
-        with psycopg2.connect(**self.params) as conn:
+        with psycopg2.connect(
+            host=self.params["host"],
+            user=self.params["user"],
+            password=self.params["password"],
+            database=self.params["database"],
+        ) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(query, (f"%{keyword.lower()}%",))
-                return cursor.fetchall()
+                return cast(
+                    List[Tuple[str, int, str]],
+                    cursor.fetchall()
+                )
 
     def _execute_query(self, query: str) -> List[Tuple[Any, ...]]:
         """Выполняет SQL-запрос и возвращает результат
@@ -115,7 +123,12 @@ class DBManager:
         Returns:
             List[Tuple[Any, ...]]: Результат выполнения запроса.
         """
-        with psycopg2.connect(**self.params) as conn:
+        with psycopg2.connect(
+            host=self.params["host"],
+            user=self.params["user"],
+            password=self.params["password"],
+            database=self.params["database"],
+        ) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(query)
                 return cursor.fetchall()
