@@ -1,12 +1,14 @@
 import logging
 import time
 from typing import List, Tuple
-
+from dotenv import load_dotenv
+import os
 import psycopg2
-
 from db_manager import DBManager
 from db_utils import create_database, create_tables
 from hh_api import HH_API
+
+load_dotenv()  # Загрузка переменных из .env
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,15 +113,19 @@ def main() -> None:
 
         api = HH_API()
         db_params = {
-            "host": "localhost",
-            "user": "postgres",
-            "password": "vvp162",
-            "database": "hh_db"
+            "host": os.getenv("DB_HOST", "localhost"),
+            "user": os.getenv("DB_USER", "postgres"),
+            "password": os.getenv("DB_PASSWORD", ""),
+            "database": os.getenv("DB_NAME", "hh_db")
         }
 
         # Создаем БД и таблицы
-        create_database("hh_db", {**db_params, "database": "postgres"})
-        create_tables("hh_db", db_params)
+        create_database(db_params["database"], {
+            "host": db_params["host"],
+            "user": db_params["user"],
+            "password": db_params["password"]
+        })
+        create_tables(db_params["database"], db_params)
 
         # Получаем данные о работодателях
         employers_data = []
