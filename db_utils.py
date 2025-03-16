@@ -15,32 +15,37 @@ def create_database(database_name: str, params: dict) -> None:
     """
     dsn = f"host={params['host']} user={params['user']} password={params['password']}"
     try:
-        with psycopg2.connect(dsn) as conn:
-            conn.autocommit = True
-            with conn.cursor() as cursor:
-                # Проверяем, существует ли БД
-                cursor.execute(
-                    sql.SQL("SELECT 1 FROM pg_database WHERE datname = %s"),
-                    (database_name,)
-                )
-                exists = cursor.fetchone()
-                if exists:
-                    print(f"БД '{database_name}' уже существует")
-                    return
+        # Создаем соединение без указания базы данных
+        conn = psycopg2.connect(dsn)
+        conn.autocommit = True  # Включаем режим автокоммита вне транзакции
 
-                # Создаем новую БД
-                cursor.execute(
-                    sql.SQL("CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8';").format(
-                        sql.Identifier(database_name)
-                    )
+        with conn.cursor() as cursor:
+            # Проверяем, существует ли БД
+            cursor.execute(
+                sql.SQL("SELECT 1 FROM pg_database WHERE datname = %s"),
+                (database_name,)
+            )
+            exists = cursor.fetchone()
+            if exists:
+                print(f"БД '{database_name}' уже существует")
+                return
+
+            # Создаем новую БД
+            cursor.execute(
+                sql.SQL("CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8';").format(
+                    sql.Identifier(database_name)
                 )
-                print(f"БД '{database_name}' успешно создана")
+            )
+            print(f"БД '{database_name}' успешно создана")
+
     except psycopg2.Error as e:
         print(f"Ошибка при создании БД: {e}")
         raise
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 def create_tables(database_name: str, params: dict) -> None:
