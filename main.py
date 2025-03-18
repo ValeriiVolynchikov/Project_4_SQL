@@ -163,12 +163,14 @@ def main() -> None:
 
 def user_interface() -> None:
     try:
-        db = DBManager({
-            "host": "localhost",
-            "user": "postgres",
-            "password": "vvp162",
-            "database": "hh_db"
-        })
+        # Получаем параметры из .env
+        db_params = {
+            "host": os.getenv("DB_HOST", "localhost"),
+            "user": os.getenv("DB_USER", "postgres"),
+            "password": os.getenv("DB_PASSWORD", ""),
+            "database": os.getenv("DB_NAME", "hh_db")
+        }
+        db = DBManager(db_params)
 
         while True:
             print("\nВыберите действие:")
